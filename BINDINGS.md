@@ -77,3 +77,13 @@ cargo test --all-targets
 cargo test --target x86_64-apple-darwin --all-targets
 cargo test --target x86_64-pc-windows-gnu --all-targets --no-run
 ```
+
+Runtime roundtrip tests (ignored by default) live in `tests/roundtrip_runtime.rs`:
+
+```bash
+# macOS Syphon OpenGL roundtrip
+cargo test --test roundtrip_runtime syphon_opengl_roundtrip_runtime -- --ignored
+
+# Windows Spout image roundtrip
+cargo test --test roundtrip_runtime spout_image_roundtrip_runtime -- --ignored
+```

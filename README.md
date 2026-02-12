@@ -67,6 +67,19 @@ The cross-platform test suite is in `tests/platform_api.rs`:
 - macOS: API-surface checks plus CGL/notification smoke tests.
 - Windows: API-surface checks for `Spout` and `SpoutSenderInfo` behavior checks.
 
+Runtime roundtrip integration tests are in `tests/roundtrip_runtime.rs` and are
+`#[ignore]` by default because they require live graphics/runtime support.
+
+Run them explicitly:
+
+```bash
+# macOS Syphon runtime roundtrip
+cargo test --test roundtrip_runtime syphon_opengl_roundtrip_runtime -- --ignored
+
+# Windows Spout runtime roundtrip
+cargo test --test roundtrip_runtime spout_image_roundtrip_runtime -- --ignored
+```
+
 ## CI
 
 GitHub Actions CI runs on every push/PR:
