@@ -1,0 +1,56 @@
+name: CI
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  macos:
+    name: macOS (Syphon)
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo artifacts
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install x86_64 macOS target
+        run: rustup target add x86_64-apple-darwin
+
+      - name: Ensure Metal toolchain (best effort)
+        run: xcodebuild -downloadComponent MetalToolchain || true
+
+      - name: Check (macOS x86_64 target)
+        run: cargo check --target x86_64-apple-darwin --all-targets
+
+      - name: Test (macOS x86_64 target)
+        run: cargo test --target x86_64-apple-darwin --all-targets
+
+  windows:
+    name: Windows (Spout)
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo artifacts
+        uses: Swatinem/rust-cache@v2
+
+      - name: Check
+        run: cargo check --all-targets
+
+      - name: Test (build and run)
+        run: cargo test --all-targets

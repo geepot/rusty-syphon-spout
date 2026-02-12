@@ -45,3 +45,18 @@ You can drop your Spout build output as-is. The build looks for **SpoutLibrary.l
 - **MT** — Static runtime. Use this if you want to avoid depending on the VC++ redist; the C runtime is linked into the DLL. Must match how the rest of your app is built to avoid runtime conflicts.
 
 For a typical `cargo build` on Windows with MSVC, **MD** is usually the right choice.
+
+## Provenance and pinning
+
+If you commit prebuilt binaries to this repository, record where they came from and keep them aligned to the checked-in source revision:
+
+- Spout: note the `Spout2` commit/tag used to build the binaries.
+- Syphon: note the `Syphon-Framework` commit/tag used for the framework.
+- Toolchain: note compiler + CMake/Xcode version used for the build.
+
+Suggested lightweight process:
+
+1. Build from the exact submodule commit in this repo.
+2. Replace `prebuilt/` artifacts.
+3. Update this README with source/version notes.
+4. Run the release validation checklist from the root `README.md`.

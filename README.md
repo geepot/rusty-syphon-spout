@@ -67,6 +67,40 @@ The cross-platform test suite is in `tests/platform_api.rs`:
 - macOS: API-surface checks plus CGL/notification smoke tests.
 - Windows: API-surface checks for `Spout` and `SpoutSenderInfo` behavior checks.
 
+## CI
+
+GitHub Actions CI runs on every push/PR:
+
+- `macOS (Syphon)`:
+  - `cargo check --target x86_64-apple-darwin --all-targets`
+  - `cargo test --target x86_64-apple-darwin --all-targets`
+- `Windows (Spout)`:
+  - `cargo check --all-targets`
+  - `cargo test --all-targets`
+
+Workflow file: `.github/workflows/ci.yml`.
+
+## Release Validation
+
+Before publishing a release, run:
+
+```bash
+# 1) Linux/macOS host compile sanity
+cargo check --all-targets
+
+# 2) macOS Syphon compatibility
+cargo test --target x86_64-apple-darwin --all-targets
+
+# 3) Windows GNU compatibility from non-Windows hosts (compile-only)
+cargo test --target x86_64-pc-windows-gnu --all-targets --no-run
+```
+
+Recommended on a Windows machine/runner as final verification:
+
+```bash
+cargo test --all-targets
+```
+
 ## License
 
 MIT OR Apache-2.0
