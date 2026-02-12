@@ -3,12 +3,16 @@
 //! OpenGL: CGL context and GL usage must follow Syphon's and macOS's rules.
 //! Metal: pass `MTLDevice`/`MTLTexture`/`MTLCommandBuffer` pointers (e.g. from the `metal` crate).
 
-use std::ffi::CStr;
-use std::os::raw::c_char;
 use std::ptr::NonNull;
+#[cfg(target_os = "macos")]
+use std::ffi::CStr;
+#[cfg(target_os = "macos")]
+use std::os::raw::c_char;
 
 #[cfg(target_os = "macos")]
 use crate::ffi;
+#[cfg(target_os = "windows")]
+use crate::ffi as spout_ffi;
 
 /// CGL context (from OpenGL/OpenGL.h). On macOS this is the real type from the FFI; elsewhere a placeholder.
 #[cfg(target_os = "macos")]
@@ -99,6 +103,51 @@ pub struct ServerDirectory {
     ptr: NonNull<std::ffi::c_void>,
 }
 
+/// Result of a server directory query by name/app name. Release when done (implements Drop).
+pub struct ServerDirectoryMatch {
+    #[cfg(target_os = "macos")]
+    ptr: NonNull<std::ffi::c_void>,
+}
+
+/// Builder for server creation options (private, antialias, depth/stencil). Pass to `OpenGLServer::new` or `MetalServer::new`.
+pub struct SyphonOptions {
+    #[cfg(target_os = "macos")]
+    ptr: NonNull<std::ffi::c_void>,
+}
+
+/// Notification name: a new Syphon server is available (for Cocoa notification center).
+pub fn notification_name_server_announce() -> Option<String> {
+    #[cfg(target_os = "macos")]
+    {
+        let s = unsafe { ffi::syphon_notification_name_server_announce() };
+        opt_cstr_to_string(s)
+    }
+    #[cfg(not(target_os = "macos"))]
+    None
+}
+
+/// Notification name: an existing server updated its description.
+pub fn notification_name_server_update() -> Option<String> {
+    #[cfg(target_os = "macos")]
+    {
+        let s = unsafe { ffi::syphon_notification_name_server_update() };
+        opt_cstr_to_string(s)
+    }
+    #[cfg(not(target_os = "macos"))]
+    None
+}
+
+/// Notification name: a server will no longer be available.
+pub fn notification_name_server_retire() -> Option<String> {
+    #[cfg(target_os = "macos")]
+    {
+        let s = unsafe { ffi::syphon_notification_name_server_retire() };
+        opt_cstr_to_string(s)
+    }
+    #[cfg(not(target_os = "macos"))]
+    None
+}
+
 /// A description of a Syphon server (from the directory or from a server's `server_description`).
 /// If you retain it for longer than a directory snapshot, use `retain`/`release` or clone the strings.
 pub struct ServerDescription {
@@ -170,6 +219,7 @@ fn opt_cstr_to_string(s: *mut c_char) -> Option<String> {
     Some(out)
 }
 
+#[cfg_attr(not(target_os = "macos"), allow(unused_variables))]
 impl ServerDirectory {
     /// Returns the shared server directory, or `None` on failure.
     pub fn shared() -> Option<Self> {
@@ -209,6 +259,151 @@ impl ServerDirectory {
         (0..n)
             .filter_map(|i| self.server_at_index(i))
             .collect()
+    }
+
+    /// Query servers by optional name and/or app name. Returns a match result you must iterate and drop.
+    pub fn servers_matching(
+        &self,
+        name: Option<&str>,
+        app_name: Option<&str>,
+    ) -> Option<ServerDirectoryMatch> {
+        #[cfg(target_os = "macos")]
+        {
+            let name_ptr = name
+                .and_then(|s| std::ffi::CString::new(s).ok())
+                .as_ref()
+                .map(|c| c.as_ptr())
+                .unwrap_or(std::ptr::null());
+            let app_ptr = app_name
+                .and_then(|s| std::ffi::CString::new(s).ok())
+                .as_ref()
+                .map(|c| c.as_ptr())
+                .unwrap_or(std::ptr::null());
+            let ptr = unsafe {
+                ffi::syphon_server_directory_servers_matching(self.ptr.as_ptr(), name_ptr, app_ptr)
+            };
+            NonNull::new(ptr).map(|ptr| ServerDirectoryMatch { ptr })
+        }
+        #[cfg(not(target_os = "macos"))]
+        None
+    }
+}
+
+#[cfg_attr(not(target_os = "macos"), allow(unused_variables))]
+impl ServerDirectoryMatch {
+    /// Number of server descriptions in this match.
+    pub fn count(&self) -> usize {
+        #[cfg(target_os = "macos")]
+        unsafe { ffi::syphon_server_directory_match_count(self.ptr.as_ptr()) }
+        #[cfg(not(target_os = "macos"))]
+        0
+    }
+
+    /// Server description at index (retained; caller owns).
+    pub fn at(&self, index: usize) -> Option<ServerDescription> {
+        #[cfg(target_os = "macos")]
+        {
+            let ptr = unsafe { ffi::syphon_server_directory_match_at_index(self.ptr.as_ptr(), index) };
+            NonNull::new(ptr).map(|ptr| ServerDescription { ptr, owned: true })
+        }
+        #[cfg(not(target_os = "macos"))]
+        None
+    }
+
+    /// Iterate over matched server descriptions (each retained).
+    pub fn iter(&self) -> impl Iterator<Item = ServerDescription> + '_ {
+        (0..self.count()).filter_map(|i| self.at(i))
+    }
+}
+
+impl Drop for ServerDirectoryMatch {
+    fn drop(&mut self) {
+        #[cfg(target_os = "macos")]
+        unsafe {
+            ffi::syphon_server_directory_match_release(self.ptr.as_ptr());
+        }
+    }
+}
+
+#[cfg_attr(not(target_os = "macos"), allow(unused_variables))]
+impl SyphonOptions {
+    /// Create an empty options builder. Use `set_is_private`, `set_antialias_sample_count`, etc., then pass to server create.
+    pub fn new() -> Option<Self> {
+        #[cfg(target_os = "macos")]
+        {
+            let ptr = unsafe { ffi::syphon_options_create() };
+            NonNull::new(ptr).map(|ptr| Self { ptr })
+        }
+        #[cfg(not(target_os = "macos"))]
+        None
+    }
+
+    /// Set the "is private" option (server invisible to others; you pass server description manually). OpenGL and Metal.
+    pub fn set_is_private(&self, value: bool) {
+        #[cfg(target_os = "macos")]
+        {
+            let k = unsafe { ffi::syphon_server_option_key_is_private() };
+            if !k.is_null() {
+                unsafe { ffi::syphon_options_set_bool(self.ptr.as_ptr(), k, value) };
+                unsafe { libc::free(k as *mut _) };
+            }
+        }
+    }
+
+    /// Set antialias sample count for OpenGL server (when using bind_to_draw_frame). Ignored by Metal.
+    pub fn set_antialias_sample_count(&self, count: u32) {
+        #[cfg(target_os = "macos")]
+        {
+            let k = unsafe { ffi::syphon_server_option_key_antialias_sample_count() };
+            if !k.is_null() {
+                unsafe {
+                    ffi::syphon_options_set_unsigned_long(self.ptr.as_ptr(), k, count as u64);
+                }
+                unsafe { libc::free(k as *mut _) };
+            }
+        }
+    }
+
+    /// Set depth buffer resolution (16, 24, or 32) for OpenGL server. Ignored by Metal.
+    pub fn set_depth_buffer_resolution(&self, bits: u32) {
+        #[cfg(target_os = "macos")]
+        {
+            let k = unsafe { ffi::syphon_server_option_key_depth_buffer_resolution() };
+            if !k.is_null() {
+                unsafe {
+                    ffi::syphon_options_set_unsigned_long(self.ptr.as_ptr(), k, bits as u64);
+                }
+                unsafe { libc::free(k as *mut _) };
+            }
+        }
+    }
+
+    /// Set stencil buffer resolution (1, 4, 8, or 16) for OpenGL server. Ignored by Metal.
+    pub fn set_stencil_buffer_resolution(&self, bits: u32) {
+        #[cfg(target_os = "macos")]
+        {
+            let k = unsafe { ffi::syphon_server_option_key_stencil_buffer_resolution() };
+            if !k.is_null() {
+                unsafe {
+                    ffi::syphon_options_set_unsigned_long(self.ptr.as_ptr(), k, bits as u64);
+                }
+                unsafe { libc::free(k as *mut _) };
+            }
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    pub(crate) fn as_ptr(&self) -> *mut std::ffi::c_void {
+        self.ptr.as_ptr()
+    }
+}
+
+impl Drop for SyphonOptions {
+    fn drop(&mut self) {
+        #[cfg(target_os = "macos")]
+        unsafe {
+            ffi::syphon_options_release(self.ptr.as_ptr());
+        }
     }
 }
 
@@ -284,13 +479,14 @@ impl Drop for ServerDescription {
     }
 }
 
+#[cfg_attr(not(target_os = "macos"), allow(unused_variables))]
 impl OpenGLServer {
-    /// Create a new OpenGL server. `name` can be None (empty). `options` can be None.
+    /// Create a new OpenGL server. `name` can be None (empty). `options` can be None or a `SyphonOptions` (e.g. private server, antialias, depth/stencil).
     /// Returns None if creation failed.
     pub fn new(
         name: Option<&str>,
         context: CGLContextObj,
-        _options: Option<&std::collections::HashMap<String, String>>,
+        options: Option<&SyphonOptions>,
     ) -> Option<Self> {
         #[cfg(target_os = "macos")]
         {
@@ -300,13 +496,45 @@ impl OpenGLServer {
                 .as_ref()
                 .map(|c| c.as_ptr())
                 .unwrap_or(std::ptr::null());
-            let ptr = unsafe {
-                ffi::syphon_opengl_server_create(name_ptr, context, std::ptr::null_mut())
-            };
+            let opts_ptr = options.map(|o| o.as_ptr()).unwrap_or(std::ptr::null_mut());
+            let ptr = unsafe { ffi::syphon_opengl_server_create(name_ptr, context, opts_ptr) };
             NonNull::new(ptr).map(|ptr| Self { ptr })
         }
         #[cfg(not(target_os = "macos"))]
         None
+    }
+
+    /// The CGL context the server uses for drawing.
+    pub fn context(&self) -> CGLContextObj {
+        #[cfg(target_os = "macos")]
+        unsafe { ffi::syphon_opengl_server_context(self.ptr.as_ptr()) }
+        #[cfg(not(target_os = "macos"))]
+        std::ptr::null_mut()
+    }
+
+    /// Human-readable server name, if set.
+    pub fn name(&self) -> Option<String> {
+        #[cfg(target_os = "macos")]
+        {
+            let s = unsafe { ffi::syphon_opengl_server_copy_name(self.ptr.as_ptr()) };
+            opt_cstr_to_string(s)
+        }
+        #[cfg(not(target_os = "macos"))]
+        None
+    }
+
+    /// Set the server's human-readable name.
+    pub fn set_name(&self, name: Option<&str>) {
+        #[cfg(target_os = "macos")]
+        {
+            let name_ptr = name
+                .map(|s| std::ffi::CString::new(s).ok())
+                .flatten()
+                .as_ref()
+                .map(|c| c.as_ptr())
+                .unwrap_or(std::ptr::null());
+            unsafe { ffi::syphon_opengl_server_set_name(self.ptr.as_ptr(), name_ptr) };
+        }
     }
 
     /// True if any clients are attached.
@@ -374,6 +602,17 @@ impl OpenGLServer {
         }
     }
 
+    /// Returns the current output frame as an OpenGL image (e.g. for loopback). Caller must release the returned image.
+    pub fn new_frame_image(&self) -> Option<OpenGLImage> {
+        #[cfg(target_os = "macos")]
+        {
+            let ptr = unsafe { ffi::syphon_opengl_server_new_frame_image(self.ptr.as_ptr()) };
+            NonNull::new(ptr).map(|ptr| OpenGLImage { ptr })
+        }
+        #[cfg(not(target_os = "macos"))]
+        None
+    }
+
     /// Stop the server.
     pub fn stop(&self) {
         #[cfg(target_os = "macos")]
@@ -402,6 +641,7 @@ pub type NewFrameCallback = Box<dyn Fn() + Send>;
 #[cfg(target_os = "macos")]
 struct CallbackHolder(Box<dyn Fn() + Send>);
 
+#[cfg_attr(not(target_os = "macos"), allow(unused_variables))]
 impl OpenGLClient {
     /// Create a client for the given server description and context. `callback` can be None (no handler).
     /// The callback may be invoked on a different thread. When provided, it is kept for the client's lifetime.
@@ -441,6 +681,25 @@ impl OpenGLClient {
                 ptr,
                 _callback_storage: callback_storage,
             })
+        }
+        #[cfg(not(target_os = "macos"))]
+        None
+    }
+
+    /// The CGL context associated with the client.
+    pub fn context(&self) -> CGLContextObj {
+        #[cfg(target_os = "macos")]
+        unsafe { ffi::syphon_opengl_client_context(self.ptr.as_ptr()) }
+        #[cfg(not(target_os = "macos"))]
+        std::ptr::null_mut()
+    }
+
+    /// Server description for the server this client is attached to (retained; caller owns).
+    pub fn server_description(&self) -> Option<ServerDescription> {
+        #[cfg(target_os = "macos")]
+        {
+            let ptr = unsafe { ffi::syphon_opengl_client_server_description(self.ptr.as_ptr()) };
+            NonNull::new(ptr).map(|ptr| ServerDescription { ptr, owned: true })
         }
         #[cfg(not(target_os = "macos"))]
         None
@@ -527,13 +786,14 @@ impl Drop for OpenGLImage {
 // Metal server
 // ---------------------------------------------------------------------------
 
+#[cfg_attr(not(target_os = "macos"), allow(unused_variables))]
 impl MetalServer {
-    /// Create a Metal server. `name` can be None. `options` can be None.
+    /// Create a Metal server. `name` can be None. `options` can be None or a `SyphonOptions` (e.g. private server).
     /// `device` must be a valid MTLDevice pointer (e.g. from the `metal` crate).
     pub fn new(
         name: Option<&str>,
         device: MTLDevicePtr,
-        _options: Option<&std::collections::HashMap<String, String>>,
+        options: Option<&SyphonOptions>,
     ) -> Option<Self> {
         #[cfg(target_os = "macos")]
         {
@@ -546,12 +806,46 @@ impl MetalServer {
                 .as_ref()
                 .map(|c| c.as_ptr())
                 .unwrap_or(std::ptr::null());
+            let opts_ptr = options.map(|o| o.as_ptr()).unwrap_or(std::ptr::null_mut());
             let ptr =
-                unsafe { ffi::syphon_metal_server_create(name_ptr, device as *mut _, std::ptr::null_mut()) };
+                unsafe { ffi::syphon_metal_server_create(name_ptr, device as *mut _, opts_ptr) };
             NonNull::new(ptr).map(|ptr| Self { ptr })
         }
         #[cfg(not(target_os = "macos"))]
         None
+    }
+
+    /// The MTLDevice the server uses.
+    pub fn device(&self) -> MTLDevicePtr {
+        #[cfg(target_os = "macos")]
+        unsafe { ffi::syphon_metal_server_device(self.ptr.as_ptr()) as MTLDevicePtr }
+        #[cfg(not(target_os = "macos"))]
+        std::ptr::null_mut()
+    }
+
+    /// Human-readable server name, if set.
+    pub fn name(&self) -> Option<String> {
+        #[cfg(target_os = "macos")]
+        {
+            let s = unsafe { ffi::syphon_metal_server_copy_name(self.ptr.as_ptr()) };
+            opt_cstr_to_string(s)
+        }
+        #[cfg(not(target_os = "macos"))]
+        None
+    }
+
+    /// Set the server's human-readable name.
+    pub fn set_name(&self, name: Option<&str>) {
+        #[cfg(target_os = "macos")]
+        {
+            let name_ptr = name
+                .map(|s| std::ffi::CString::new(s).ok())
+                .flatten()
+                .as_ref()
+                .map(|c| c.as_ptr())
+                .unwrap_or(std::ptr::null());
+            unsafe { ffi::syphon_metal_server_set_name(self.ptr.as_ptr(), name_ptr) };
+        }
     }
 
     pub fn has_clients(&self) -> bool {
@@ -635,6 +929,7 @@ impl Drop for MetalServer {
 // Metal client
 // ---------------------------------------------------------------------------
 
+#[cfg_attr(not(target_os = "macos"), allow(unused_variables))]
 impl MetalClient {
     /// Create a Metal client. `device` must be a valid MTLDevice pointer. `callback` can be None.
     pub fn new(
@@ -676,6 +971,17 @@ impl MetalClient {
                 ptr,
                 _callback_storage: callback_storage,
             })
+        }
+        #[cfg(not(target_os = "macos"))]
+        None
+    }
+
+    /// Server description for the server this client is attached to (retained; caller owns).
+    pub fn server_description(&self) -> Option<ServerDescription> {
+        #[cfg(target_os = "macos")]
+        {
+            let ptr = unsafe { ffi::syphon_metal_client_server_description(self.ptr.as_ptr()) };
+            NonNull::new(ptr).map(|ptr| ServerDescription { ptr, owned: true })
         }
         #[cfg(not(target_os = "macos"))]
         None
@@ -743,6 +1049,458 @@ impl Drop for MetalTexture {
         #[cfg(target_os = "macos")]
         unsafe {
             ffi::syphon_metal_texture_release(self.ptr.as_ptr());
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Spout (Windows)
+// ---------------------------------------------------------------------------
+
+/// Spout instance for sending or receiving frames (Windows only).
+/// One handle can be used as sender or receiver (not both concurrently).
+#[cfg(target_os = "windows")]
+pub struct Spout {
+    handle: NonNull<std::ffi::c_void>,
+}
+
+#[cfg(target_os = "windows")]
+impl Spout {
+    /// Create a new Spout instance. Returns `None` if Spout is unavailable.
+    pub fn new() -> Option<Self> {
+        let handle = unsafe { spout_ffi::spout_create() };
+        NonNull::new(handle).map(|handle| Self { handle })
+    }
+
+    /// ---- Sender ----
+    /// Set the sender name (publisher name).
+    pub fn sender_set_name(&self, name: Option<&str>) {
+        let name_ptr = name
+            .and_then(|s| std::ffi::CString::new(s).ok())
+            .as_ref()
+            .map(|c| c.as_ptr())
+            .unwrap_or(std::ptr::null());
+        unsafe { spout_ffi::spout_sender_set_name(self.handle.as_ptr(), name_ptr) };
+    }
+
+    /// Set sender DXGI format (e.g. value from DXGI_FORMAT).
+    pub fn sender_set_format(&self, dxgi_format: u32) {
+        unsafe { spout_ffi::spout_sender_set_format(self.handle.as_ptr(), dxgi_format) };
+    }
+
+    /// Send an OpenGL texture. Returns true on success.
+    pub fn sender_send_texture(
+        &self,
+        tex_id: u32,
+        target: u32,
+        width: u32,
+        height: u32,
+        invert: bool,
+    ) -> bool {
+        unsafe {
+            spout_ffi::spout_sender_send_texture(
+                self.handle.as_ptr(),
+                tex_id,
+                target,
+                width,
+                height,
+                invert,
+            )
+        }
+    }
+
+    /// Send from a bound FBO. The FBO must be currently bound. Use 0 for default framebuffer with width/height.
+    pub fn sender_send_fbo(&self, fbo_id: u32, width: u32, height: u32, invert: bool) -> bool {
+        unsafe {
+            spout_ffi::spout_sender_send_fbo(
+                self.handle.as_ptr(),
+                fbo_id,
+                width,
+                height,
+                invert,
+            )
+        }
+    }
+
+    /// Send image pixels (e.g. GL_RGBA). Buffer size must be at least width*height*bytes_per_pixel for the format.
+    pub fn sender_send_image(
+        &self,
+        pixels: &[u8],
+        width: u32,
+        height: u32,
+        gl_format: u32,
+        invert: bool,
+    ) -> bool {
+        unsafe {
+            spout_ffi::spout_sender_send_image(
+                self.handle.as_ptr(),
+                pixels.as_ptr(),
+                width,
+                height,
+                gl_format,
+                invert,
+            )
+        }
+    }
+
+    /// Release the sender and free resources.
+    pub fn sender_release(&self) {
+        unsafe { spout_ffi::spout_sender_release(self.handle.as_ptr()) };
+    }
+
+    /// True if the sender is initialized.
+    pub fn sender_is_initialized(&self) -> bool {
+        unsafe { spout_ffi::spout_sender_is_initialized(self.handle.as_ptr()) }
+    }
+
+    pub fn sender_width(&self) -> u32 {
+        unsafe { spout_ffi::spout_sender_get_width(self.handle.as_ptr()) }
+    }
+
+    pub fn sender_height(&self) -> u32 {
+        unsafe { spout_ffi::spout_sender_get_height(self.handle.as_ptr()) }
+    }
+
+    /// Current sender name (None if not set or error). Caller does not free.
+    pub fn sender_name(&self) -> Option<String> {
+        let s = unsafe { spout_ffi::spout_sender_get_name(self.handle.as_ptr()) };
+        if s.is_null() {
+            return None;
+        }
+        let cstr = unsafe { std::ffi::CStr::from_ptr(s) };
+        let out = cstr.to_string_lossy().into_owned();
+        unsafe { spout_ffi::spout_string_free(s) };
+        Some(out)
+    }
+
+    /// Current sender DXGI format.
+    pub fn sender_format(&self) -> u32 {
+        unsafe { spout_ffi::spout_sender_get_format(self.handle.as_ptr()) }
+    }
+
+    /// Sender frame rate.
+    pub fn sender_fps(&self) -> f64 {
+        unsafe { spout_ffi::spout_sender_get_fps(self.handle.as_ptr()) }
+    }
+
+    /// Sender frame number.
+    pub fn sender_frame(&self) -> i64 {
+        unsafe { spout_ffi::spout_sender_get_frame(self.handle.as_ptr()) as i64 }
+    }
+
+    /// ---- Receiver ----
+    /// Set the sender name to receive from (None = active sender).
+    pub fn receiver_set_name(&self, sender_name: Option<&str>) {
+        let ptr = sender_name
+            .and_then(|s| std::ffi::CString::new(s).ok())
+            .as_ref()
+            .map(|c| c.as_ptr())
+            .unwrap_or(std::ptr::null());
+        unsafe { spout_ffi::spout_receiver_set_name(self.handle.as_ptr(), ptr) };
+    }
+
+    /// Receive into an OpenGL texture. Returns true on success.
+    pub fn receiver_receive_texture(&self, tex_id: u32, target: u32, invert: bool) -> bool {
+        unsafe { spout_ffi::spout_receiver_receive_texture(self.handle.as_ptr(), tex_id, target, invert) }
+    }
+
+    /// Receive into a pixel buffer. Buffer size must be at least sender_width*sender_height*bytes_per_pixel for the format.
+    pub fn receiver_receive_image(&self, pixels: &mut [u8], gl_format: u32, invert: bool) -> bool {
+        unsafe {
+            spout_ffi::spout_receiver_receive_image(
+                self.handle.as_ptr(),
+                pixels.as_mut_ptr(),
+                gl_format,
+                invert,
+            )
+        }
+    }
+
+    /// Release the receiver.
+    pub fn receiver_release(&self) {
+        unsafe { spout_ffi::spout_receiver_release(self.handle.as_ptr()) };
+    }
+
+    /// Get the name of the sender we're receiving from.
+    pub fn receiver_sender_name(&self) -> Option<String> {
+        let mut buf = vec![0u8; 256];
+        let ok = unsafe {
+            spout_ffi::spout_receiver_get_sender_name(
+                self.handle.as_ptr(),
+                buf.as_mut_ptr() as *mut i8,
+                256,
+            )
+        };
+        if !ok {
+            return None;
+        }
+        let end = buf.iter().position(|&b| b == 0).unwrap_or(buf.len());
+        std::str::from_utf8(&buf[..end]).ok().map(|s| s.to_string())
+    }
+
+    pub fn receiver_is_frame_new(&self) -> bool {
+        unsafe { spout_ffi::spout_receiver_is_frame_new(self.handle.as_ptr()) }
+    }
+
+    /// True if the sender has updated (dimensions or connection). Check before receiving.
+    pub fn receiver_is_updated(&self) -> bool {
+        unsafe { spout_ffi::spout_receiver_is_updated(self.handle.as_ptr()) }
+    }
+
+    pub fn receiver_is_connected(&self) -> bool {
+        unsafe { spout_ffi::spout_receiver_is_connected(self.handle.as_ptr()) }
+    }
+
+    pub fn receiver_sender_width(&self) -> u32 {
+        unsafe { spout_ffi::spout_receiver_get_sender_width(self.handle.as_ptr()) }
+    }
+
+    pub fn receiver_sender_height(&self) -> u32 {
+        unsafe { spout_ffi::spout_receiver_get_sender_height(self.handle.as_ptr()) }
+    }
+
+    /// Sender DXGI format (when receiving).
+    pub fn receiver_sender_format(&self) -> u32 {
+        unsafe { spout_ffi::spout_receiver_get_sender_format(self.handle.as_ptr()) }
+    }
+
+    /// Sender frame rate (when receiving).
+    pub fn receiver_sender_fps(&self) -> f64 {
+        unsafe { spout_ffi::spout_receiver_get_sender_fps(self.handle.as_ptr()) }
+    }
+
+    /// Sender frame number (when receiving).
+    pub fn receiver_sender_frame(&self) -> i64 {
+        unsafe { spout_ffi::spout_receiver_get_sender_frame(self.handle.as_ptr()) as i64 }
+    }
+
+    /// ---- Bind shared texture (receiver) ----
+    /// Bind the shared texture for reading. Use `shared_texture_id()` after bind to get the GL texture ID.
+    pub fn bind_shared_texture(&self) -> bool {
+        unsafe { spout_ffi::spout_bind_shared_texture(self.handle.as_ptr()) }
+    }
+
+    /// Unbind the shared texture.
+    pub fn unbind_shared_texture(&self) -> bool {
+        unsafe { spout_ffi::spout_unbind_shared_texture(self.handle.as_ptr()) }
+    }
+
+    /// OpenGL shared texture ID (valid after bind_shared_texture).
+    pub fn shared_texture_id(&self) -> u32 {
+        unsafe { spout_ffi::spout_get_shared_texture_id(self.handle.as_ptr()) }
+    }
+
+    /// ---- Sender list (discovery) ----
+    pub fn sender_count(&self) -> i32 {
+        unsafe { spout_ffi::spout_get_sender_count(self.handle.as_ptr()) }
+    }
+
+    /// Get sender name at index. Returns None if index out of range.
+    pub fn sender_name_at(&self, index: i32) -> Option<String> {
+        let mut buf = vec![0u8; 256];
+        let ok = unsafe {
+            spout_ffi::spout_get_sender_name(
+                self.handle.as_ptr(),
+                index,
+                buf.as_mut_ptr() as *mut i8,
+                256,
+            )
+        };
+        if !ok {
+            return None;
+        }
+        let end = buf.iter().position(|&b| b == 0).unwrap_or(buf.len());
+        std::str::from_utf8(&buf[..end]).ok().map(|s| s.to_string())
+    }
+
+    /// True if the given sender name exists in the list.
+    pub fn find_sender_name(&self, sendername: &str) -> bool {
+        let c = std::ffi::CString::new(sendername).ok();
+        let ptr = c.as_ref().map(|c| c.as_ptr()).unwrap_or(std::ptr::null());
+        unsafe { spout_ffi::spout_find_sender_name(self.handle.as_ptr(), ptr) }
+    }
+
+    /// Get the current active sender name.
+    pub fn active_sender(&self) -> Option<String> {
+        let mut buf = vec![0u8; 256];
+        let ok = unsafe {
+            spout_ffi::spout_get_active_sender(
+                self.handle.as_ptr(),
+                buf.as_mut_ptr() as *mut i8,
+                256,
+            )
+        };
+        if !ok {
+            return None;
+        }
+        let end = buf.iter().position(|&b| b == 0).unwrap_or(buf.len());
+        if end == 0 {
+            return None;
+        }
+        std::str::from_utf8(&buf[..end]).ok().map(|s| s.to_string())
+    }
+
+    /// Set the active sender by name.
+    pub fn set_active_sender(&self, sendername: Option<&str>) -> bool {
+        let ptr = sendername
+            .and_then(|s| std::ffi::CString::new(s).ok())
+            .as_ref()
+            .map(|c| c.as_ptr())
+            .unwrap_or(std::ptr::null());
+        unsafe { spout_ffi::spout_set_active_sender(self.handle.as_ptr(), ptr) }
+    }
+
+    /// Sender info (width, height, share handle, DX format). Returns None if not found.
+    pub fn sender_info(&self, sendername: &str) -> Option<SpoutSenderInfo> {
+        let name = std::ffi::CString::new(sendername).ok()?;
+        let mut width = 0u32;
+        let mut height = 0u32;
+        let mut handle = std::ptr::null_mut();
+        let mut format = 0u32;
+        let ok = unsafe {
+            spout_ffi::spout_get_sender_info(
+                self.handle.as_ptr(),
+                name.as_ptr(),
+                &mut width,
+                &mut height,
+                &mut handle,
+                &mut format,
+            )
+        };
+        if !ok {
+            return None;
+        }
+        Some(SpoutSenderInfo {
+            width,
+            height,
+            share_handle: handle,
+            format,
+        })
+    }
+
+    /// Signal a frame-sync event for a sender.
+    pub fn set_frame_sync(&self, sendername: Option<&str>) {
+        let ptr = sendername
+            .and_then(|s| std::ffi::CString::new(s).ok())
+            .as_ref()
+            .map(|c| c.as_ptr())
+            .unwrap_or(std::ptr::null());
+        unsafe { spout_ffi::spout_set_frame_sync(self.handle.as_ptr(), ptr) };
+    }
+
+    /// Wait (or poll with timeout 0) for a frame-sync event.
+    pub fn wait_frame_sync(&self, sendername: Option<&str>, timeout_ms: u32) -> bool {
+        let ptr = sendername
+            .and_then(|s| std::ffi::CString::new(s).ok())
+            .as_ref()
+            .map(|c| c.as_ptr())
+            .unwrap_or(std::ptr::null());
+        unsafe { spout_ffi::spout_wait_frame_sync(self.handle.as_ptr(), ptr, timeout_ms) }
+    }
+
+    /// Enable or disable frame sync.
+    pub fn enable_frame_sync(&self, enabled: bool) {
+        unsafe { spout_ffi::spout_enable_frame_sync(self.handle.as_ptr(), enabled) };
+    }
+
+    /// Close frame sync resources.
+    pub fn close_frame_sync(&self) {
+        unsafe { spout_ffi::spout_close_frame_sync(self.handle.as_ptr()) };
+    }
+
+    /// True if frame sync is enabled.
+    pub fn is_frame_sync_enabled(&self) -> bool {
+        unsafe { spout_ffi::spout_is_frame_sync_enabled(self.handle.as_ptr()) }
+    }
+
+    /// Write arbitrary bytes to a shared memory buffer for a sender.
+    pub fn write_memory_buffer(&self, sendername: &str, data: &[u8]) -> bool {
+        let name = match std::ffi::CString::new(sendername) {
+            Ok(v) => v,
+            Err(_) => return false,
+        };
+        unsafe {
+            spout_ffi::spout_write_memory_buffer(
+                self.handle.as_ptr(),
+                name.as_ptr(),
+                data.as_ptr() as *const i8,
+                data.len() as i32,
+            )
+        }
+    }
+
+    /// Read bytes from a sender memory buffer into `out`. Returns number of bytes read.
+    pub fn read_memory_buffer(&self, sendername: &str, out: &mut [u8]) -> usize {
+        let name = match std::ffi::CString::new(sendername) {
+            Ok(v) => v,
+            Err(_) => return 0,
+        };
+        let n = unsafe {
+            spout_ffi::spout_read_memory_buffer(
+                self.handle.as_ptr(),
+                name.as_ptr(),
+                out.as_mut_ptr() as *mut i8,
+                out.len() as i32,
+            )
+        };
+        if n <= 0 {
+            0
+        } else {
+            n as usize
+        }
+    }
+
+    /// Maximum number of registered senders allowed by Spout.
+    pub fn max_senders(&self) -> i32 {
+        unsafe { spout_ffi::spout_get_max_senders(self.handle.as_ptr()) }
+    }
+
+    /// True if sender frame buffering is enabled.
+    pub fn buffer_mode(&self) -> bool {
+        unsafe { spout_ffi::spout_get_buffer_mode(self.handle.as_ptr()) }
+    }
+
+    /// Enable or disable sender frame buffering.
+    pub fn set_buffer_mode(&self, active: bool) {
+        unsafe { spout_ffi::spout_set_buffer_mode(self.handle.as_ptr(), active) };
+    }
+
+    /// Number of sender frame buffers.
+    pub fn buffers(&self) -> i32 {
+        unsafe { spout_ffi::spout_get_buffers(self.handle.as_ptr()) }
+    }
+
+    /// Set number of sender frame buffers.
+    pub fn set_buffers(&self, buffers: i32) {
+        unsafe { spout_ffi::spout_set_buffers(self.handle.as_ptr(), buffers) };
+    }
+
+    /// Current CPU sharing mode.
+    pub fn cpu_mode(&self) -> bool {
+        unsafe { spout_ffi::spout_get_cpu_mode(self.handle.as_ptr()) }
+    }
+
+    /// Set CPU sharing mode.
+    pub fn set_cpu_mode(&self, cpu_mode: bool) -> bool {
+        unsafe { spout_ffi::spout_set_cpu_mode(self.handle.as_ptr(), cpu_mode) }
+    }
+}
+
+/// Sender info from discovery (width, height, DX share handle, format).
+#[cfg(target_os = "windows")]
+#[derive(Debug, Clone)]
+pub struct SpoutSenderInfo {
+    pub width: u32,
+    pub height: u32,
+    pub share_handle: *mut std::ffi::c_void,
+    pub format: u32,
+}
+
+#[cfg(target_os = "windows")]
+impl Drop for Spout {
+    fn drop(&mut self) {
+        unsafe {
+            spout_ffi::spout_destroy(self.handle.as_ptr());
         }
     }
 }
