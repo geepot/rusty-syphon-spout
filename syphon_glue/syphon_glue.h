@@ -20,6 +20,15 @@ extern "C" {
 void *syphon_server_directory_shared(void);
 size_t syphon_server_directory_servers_count(void *dir);
 void *syphon_server_directory_server_at_index(void *dir, size_t index);
+/* Query servers by name/app name; result must be released with syphon_server_directory_match_release. */
+void *syphon_server_directory_servers_matching(void *dir, const char *name, const char *app_name);
+size_t syphon_server_directory_match_count(void *match_result);
+void *syphon_server_directory_match_at_index(void *match_result, size_t index);
+void syphon_server_directory_match_release(void *match_result);
+/* Notification names (caller frees returned string): announce, update, retire. */
+char *syphon_notification_name_server_announce(void);
+char *syphon_notification_name_server_update(void);
+char *syphon_notification_name_server_retire(void);
 
 /* Server description (NSDictionary*); do not release unless you retained */
 char *syphon_server_description_copy_uuid(void *desc);
@@ -27,6 +36,16 @@ char *syphon_server_description_copy_name(void *desc);
 char *syphon_server_description_copy_app_name(void *desc);
 void syphon_server_description_retain(void *desc);
 void syphon_server_description_release(void *desc);
+
+/* Server options (for server create); keys below. Caller releases with syphon_options_release. */
+void *syphon_options_create(void);
+void syphon_options_set_bool(void *opts, const char *key, bool value);
+void syphon_options_set_unsigned_long(void *opts, const char *key, unsigned long value);
+void syphon_options_release(void *opts);
+char *syphon_server_option_key_is_private(void);
+char *syphon_server_option_key_antialias_sample_count(void);
+char *syphon_server_option_key_depth_buffer_resolution(void);
+char *syphon_server_option_key_stencil_buffer_resolution(void);
 
 /* OpenGL server */
 void *syphon_opengl_server_create(const char *name, CGLContextObj context, void *options);
@@ -38,6 +57,10 @@ void syphon_opengl_server_publish_frame(void *server, GLuint tex_id, GLenum targ
 bool syphon_opengl_server_bind_to_draw_frame(void *server, double w, double h);
 void syphon_opengl_server_unbind_and_publish(void *server);
 void syphon_opengl_server_stop(void *server);
+CGLContextObj syphon_opengl_server_context(void *server);
+char *syphon_opengl_server_copy_name(void *server);
+void syphon_opengl_server_set_name(void *server, const char *name);
+void *syphon_opengl_server_new_frame_image(void *server);
 
 /* OpenGL client. new_frame_callback may be NULL. */
 void *syphon_opengl_client_create(void *server_description, CGLContextObj context,
@@ -47,6 +70,8 @@ bool syphon_opengl_client_is_valid(void *client);
 bool syphon_opengl_client_has_new_frame(void *client);
 void *syphon_opengl_client_new_frame_image(void *client);
 void syphon_opengl_client_stop(void *client);
+CGLContextObj syphon_opengl_client_context(void *client);
+void *syphon_opengl_client_server_description(void *client);
 
 /* OpenGL image (caller must release with syphon_opengl_image_release) */
 void syphon_opengl_image_release(void *image);
@@ -62,6 +87,9 @@ void syphon_metal_server_publish_frame(void *server, void *texture, void *comman
     double x, double y, double w, double h, bool flipped);
 void *syphon_metal_server_new_frame_image(void *server);
 void syphon_metal_server_stop(void *server);
+void *syphon_metal_server_device(void *server);
+char *syphon_metal_server_copy_name(void *server);
+void syphon_metal_server_set_name(void *server, const char *name);
 
 /* Metal client. new_frame_callback may be NULL. */
 void *syphon_metal_client_create(void *server_description, void *device,
@@ -71,6 +99,7 @@ bool syphon_metal_client_is_valid(void *client);
 bool syphon_metal_client_has_new_frame(void *client);
 void *syphon_metal_client_new_frame_image(void *client);
 void syphon_metal_client_stop(void *client);
+void *syphon_metal_client_server_description(void *client);
 
 /* Metal texture (caller must release with syphon_metal_texture_release) */
 void syphon_metal_texture_release(void *texture);
