@@ -3,11 +3,11 @@
 //!
 //! Run on macOS: cargo run --example roundtrip
 
-#![cfg(target_os = "macos")]
-
+#[cfg(target_os = "macos")]
+mod macos_roundtrip {
 use metal::foreign_types::{ForeignType, ForeignTypeRef};
 use metal::{Device, MTLPixelFormat, MTLRegion, MTLTextureType, Texture, TextureDescriptor};
-use rusty_syphon::{
+use rusty_syphon_spout::{
     cgl_create_headless_context, cgl_destroy_context, cgl_make_current,
     gl_create_texture_rectangle_rgba8, gl_delete_texture, gl_read_texture_rectangle_rgba8,
     OpenGLClient, OpenGLImage, OpenGLServer, MetalClient, MetalServer, MetalTexture,
@@ -190,8 +190,19 @@ fn test_opengl_roundtrip() {
     cgl_destroy_context(ctx);
 }
 
-fn main() {
+pub fn run() {
     test_metal_roundtrip();
     test_opengl_roundtrip();
     println!("All roundtrip tests passed.");
+}
+}
+
+#[cfg(target_os = "macos")]
+fn main() {
+    macos_roundtrip::run();
+}
+
+#[cfg(not(target_os = "macos"))]
+fn main() {
+    println!("Syphon roundtrip example runs on macOS only.");
 }
